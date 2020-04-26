@@ -1,0 +1,77 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+variables:
+- group: azure_packer
+- name: vm_size
+  value: "Standard_DS2_V2"
+
+trigger:
+- dev
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+- stage: Build  # name of the stage (A-Z, a-z, 0-9, and underscore)
+  displayName: 'Build Packer Image'  # friendly name to display in the UI
+  jobs: 
+  - job:
+    steps:
+      - task : PackerBuild@1
+        inputs:
+          templateType: 'custom'
+          customTemplateLocation: 'Packer/azure_ubuntu.json'
+          customTemplateParameters: '
+          {
+            "client_id": "$(client_id)",
+            "client_secret": "$(client_secret)",
+            "subscription_id": "$(sub_id)",
+            "tenant_id": "$(tenant_id)",
+            "resource_group_name": "packertest",
+            "image_name": "ubuntu-$(Build.BuildNumber)",
+            "vm_size": "$(vm_size)"
+          }'
+          packerVersion: '1.5.5'
+
+
+- stage: Deploy  # name of the stage (A-Z, a-z, 0-9, and underscore)
+  displayName: 'Deploy Vm using Terraform'  # friendly name to display in the UI
+  jobs: 
+  - job:
+    steps:
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'MVP'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            export ARM_CLIENT_ID="$(client_id)"
+            export ARM_CLIENT_SECRET="$(client_secret)"
+            export ARM_SUBSCRIPTION_ID="$(sub_id)"
+            export ARM_TENANT_ID="$(tenant_id)"
+            terraform init -no-color
+            terraform apply -no-color -auto-approve -input=false
+          addSpnToEnvironment: true
+          workingDirectory: $(Build.SourcesDirectory)/terraform/
+          useGlobalConfig: true
+
+- stage: Configure  # name of the stage (A-Z, a-z, 0-9, and underscore)
+  displayName: 'Configure VM using Ansible'  # friendly name to display in the UI
+  jobs: 
+  - job:
+    steps:
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'MVP'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: |
+            export ANSIBLE_HOST_KEY_CHECKING=False
+            pip install ansible[azure]
+            ansible-playbook -i ./inventory/westeurope ./playbook.yml
+          addSpnToEnvironment: true
+          workingDirectory: $(Build.SourcesDirectory)/ansible/
+          useGlobalConfig: true
